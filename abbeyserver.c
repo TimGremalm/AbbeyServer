@@ -15,6 +15,7 @@
 
 #include <semphr.h>
 
+#include "pwm.h"
 
 #define MQTT_HOST ("192.168.0.1")
 #define MQTT_PORT 1883
@@ -33,7 +34,7 @@ static void beat_task(void *pvParameters) {
 
 	while (1) {
 		vTaskDelayUntil(&xLastWakeTime, 10000 / portTICK_PERIOD_MS);
-		printf("beat\r\n");
+		//printf("beat\r\n");
 		snprintf(msg, PUB_MSG_LEN, "Beat %d\r\n", count++);
 		if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
 			printf("Publish queue overflow.\r\n");
@@ -53,6 +54,14 @@ static void topic_received(mqtt_message_data_t *md) {
 		printf("%c", ((char *)(message->payload))[i]);
 
 	printf("\r\n");
+	char buf[100] = {0};
+	if (message->payloadlen < sizeof(buf)) {
+		memcpy(buf, message->payload, message->payloadlen);
+		int parsedNumber = atoi(buf);
+		if (parsedNumber > 1000 && parsedNumber <2000) {
+			printf("Parsed: %d\n", parsedNumber);
+		}
+	}
 }
 
 static const char * get_my_id(void) {
@@ -123,13 +132,13 @@ static void mqtt_task(void *pvParameters) {
 			continue;
 		}
 		printf("done\r\n");
-		mqtt_subscribe(&client, "/esptopic", MQTT_QOS1, topic_received);
+		mqtt_subscribe(&client, "/bell", MQTT_QOS1, topic_received);
 		xQueueReset(publish_queue);
 
 		while(1) {
 			char msg[PUB_MSG_LEN - 1] = "\0";
 			while(xQueueReceive(publish_queue, (void *)msg, 0) == pdTRUE) {
-				printf("got message to publish\r\n");
+				//printf("got message to publish\r\n");
 				mqtt_message_t message;
 				message.payload = msg;
 				message.payloadlen = PUB_MSG_LEN;
@@ -198,6 +207,28 @@ static void wifi_task(void *pvParameters) {
 	}
 }
 
+void servo_task(void *pvParameters) {
+	uint8_t    pins[] = {14, 12, 13, 15, 3, 1}; //NodeMCU D5-D10 https://github.com/nodemcu/nodemcu-devkit-v1.0#pin-map
+	while(1) {
+		//min = 3277 ((1000µs/20000µs)*UINT16_MAX)
+		//mid = 4915 ((1500µs/20000µs)*UINT16_MAX)
+		//max = 6553 ((2000µs/20000µs)*UINT16_MAX)
+		pwm_init(1, &pins[0], false);
+		pwm_set_freq(50);
+		pwm_set_duty(3277);
+		pwm_start();
+		vTaskDelay(500);
+
+		pwm_init(1, &pins[1], false);
+		pwm_set_freq(50);
+		pwm_set_duty(4915);
+		pwm_start();
+		vTaskDelay(500);
+
+		vTaskDelay(200);
+	}
+}
+
 void user_init(void) {
 	uart_set_baud(0, 115200);
 	printf("SDK version:%s\n", sdk_system_get_sdk_version());
@@ -207,5 +238,6 @@ void user_init(void) {
 	xTaskCreate(&wifi_task, "wifi_task",  256, NULL, 2, NULL);
 	xTaskCreate(&beat_task, "beat_task", 256, NULL, 3, NULL);
 	xTaskCreate(&mqtt_task, "mqtt_task", 1024, NULL, 4, NULL);
+	xTaskCreate(&servo_task, "servo_task", 1024, NULL, 4, NULL);
 }
 
