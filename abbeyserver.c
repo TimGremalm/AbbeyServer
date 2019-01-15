@@ -27,6 +27,13 @@ SemaphoreHandle_t wifi_alive;
 QueueHandle_t publish_queue;
 #define PUB_MSG_LEN 16
 
+#define SERVO_MIN 3277 // ((1000µs/20000µs)*UINT16_MAX)
+#define SERVO_MID 4915 // ((1500µs/20000µs)*UINT16_MAX)
+#define SERVO_MAX 6553 // ((2000µs/20000µs)*UINT16_MAX)
+
+#define BELLS 6
+TickType_t bellcalls[BELLS] = {0};
+
 static void beat_task(void *pvParameters) {
 	TickType_t xLastWakeTime = xTaskGetTickCount();
 	char msg[PUB_MSG_LEN];
@@ -34,10 +41,10 @@ static void beat_task(void *pvParameters) {
 
 	while (1) {
 		vTaskDelayUntil(&xLastWakeTime, 10000 / portTICK_PERIOD_MS);
-		//printf("beat\r\n");
-		snprintf(msg, PUB_MSG_LEN, "Beat %d\r\n", count++);
+		//printf("beat\n");
+		snprintf(msg, PUB_MSG_LEN, "Beat %d\n", count++);
 		if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
-			printf("Publish queue overflow.\r\n");
+			printf("Publish queue overflow.\n");
 		}
 	}
 }
@@ -53,13 +60,22 @@ static void topic_received(mqtt_message_data_t *md) {
 	for( i = 0; i < (int)message->payloadlen; ++i)
 		printf("%c", ((char *)(message->payload))[i]);
 
-	printf("\r\n");
+	printf("\n");
 	char buf[100] = {0};
 	if (message->payloadlen < sizeof(buf)) {
 		memcpy(buf, message->payload, message->payloadlen);
 		int parsedNumber = atoi(buf);
-		if (parsedNumber > 1000 && parsedNumber <2000) {
-			printf("Parsed: %d\n", parsedNumber);
+		if (parsedNumber >= 0 && parsedNumber <= BELLS) {
+			TickType_t now = xTaskGetTickCount();
+			if (parsedNumber == 0) {
+				printf("Call all bells at tick %d\n", now);
+				for (i=0; i < BELLS; i++) {
+					bellcalls[i] = now;
+				}
+			} else {
+				printf("Call bell: %d at tick %d\n", parsedNumber, now);
+				bellcalls[parsedNumber - 1] = now;
+			}
 		}
 	}
 }
@@ -103,16 +119,16 @@ static void mqtt_task(void *pvParameters) {
 
 	while(1) {
 		xSemaphoreTake(wifi_alive, portMAX_DELAY);
-		printf("%s: started\n\r", __func__);
+		printf("%s: started\n", __func__);
 		printf("%s: (Re)connecting to MQTT server %s ... ",__func__,
 			   MQTT_HOST);
 		ret = mqtt_network_connect(&network, MQTT_HOST, MQTT_PORT);
 		if(ret) {
-			printf("error: %d\n\r", ret);
+			printf("error: %d\n", ret);
 			taskYIELD();
 			continue;
 		}
-		printf("done\n\r");
+		printf("done\n");
 		mqtt_client_new(&client, &network, 5000, mqtt_buf, 100,
 					  mqtt_readbuf, 100);
 
@@ -126,19 +142,19 @@ static void mqtt_task(void *pvParameters) {
 		printf("Send MQTT connect ... ");
 		ret = mqtt_connect(&client, &data);
 		if(ret) {
-			printf("error: %d\n\r", ret);
+			printf("error: %d\n", ret);
 			mqtt_network_disconnect(&network);
 			taskYIELD();
 			continue;
 		}
-		printf("done\r\n");
+		printf("done\n");
 		mqtt_subscribe(&client, "/bell", MQTT_QOS1, topic_received);
 		xQueueReset(publish_queue);
 
 		while(1) {
 			char msg[PUB_MSG_LEN - 1] = "\0";
 			while(xQueueReceive(publish_queue, (void *)msg, 0) == pdTRUE) {
-				//printf("got message to publish\r\n");
+				//printf("got message to publish\n");
 				mqtt_message_t message;
 				message.payload = msg;
 				message.payloadlen = PUB_MSG_LEN;
@@ -156,7 +172,7 @@ static void mqtt_task(void *pvParameters) {
 			if (ret == MQTT_DISCONNECTED)
 				break;
 		}
-		printf("Connection dropped, request restart\n\r");
+		printf("Connection dropped, request restart\n");
 		mqtt_network_disconnect(&network);
 		taskYIELD();
 	}
@@ -170,29 +186,29 @@ static void wifi_task(void *pvParameters) {
 		.password = WIFI_PASS,
 	};
 
-	printf("WiFi: connecting to WiFi\n\r");
+	printf("WiFi: connecting to WiFi\n");
 	sdk_wifi_set_opmode(STATION_MODE);
 	sdk_wifi_station_set_config(&config);
 
 	while(1) {
 		while ((status != STATION_GOT_IP) && (retries)) {
 			status = sdk_wifi_station_get_connect_status();
-			printf("%s: status = %d\n\r", __func__, status );
+			printf("%s: status = %d\n", __func__, status );
 			if( status == STATION_WRONG_PASSWORD ){
-				printf("WiFi: wrong password\n\r");
+				printf("WiFi: wrong password\n");
 				break;
 			} else if( status == STATION_NO_AP_FOUND ) {
-				printf("WiFi: AP not found\n\r");
+				printf("WiFi: AP not found\n");
 				break;
 			} else if( status == STATION_CONNECT_FAIL ) {
-				printf("WiFi: connection failed\r\n");
+				printf("WiFi: connection failed\n");
 				break;
 			}
 			vTaskDelay( 1000 / portTICK_PERIOD_MS );
 			--retries;
 		}
 		if (status == STATION_GOT_IP) {
-			printf("WiFi: Connected\n\r");
+			printf("WiFi: Connected\n");
 			xSemaphoreGive( wifi_alive );
 			taskYIELD();
 		}
@@ -201,31 +217,42 @@ static void wifi_task(void *pvParameters) {
 			xSemaphoreGive( wifi_alive );
 			taskYIELD();
 		}
-		printf("WiFi: disconnected\n\r");
+		printf("WiFi: disconnected\n");
 		sdk_wifi_station_disconnect();
 		vTaskDelay( 1000 / portTICK_PERIOD_MS );
 	}
 }
 
 void servo_task(void *pvParameters) {
-	uint8_t    pins[] = {14, 12, 13, 15, 3, 1}; //NodeMCU D5-D10 https://github.com/nodemcu/nodemcu-devkit-v1.0#pin-map
+	uint8_t pins[] = {14, 12, 13, 15, 5, 4}; //NodeMCU D5-D10 https://github.com/nodemcu/nodemcu-devkit-v1.0#pin-map
+	uint16_t servoRange = 2000;
+	uint16_t servoStart = 4000;
 	while(1) {
-		//min = 3277 ((1000µs/20000µs)*UINT16_MAX)
-		//mid = 4915 ((1500µs/20000µs)*UINT16_MAX)
-		//max = 6553 ((2000µs/20000µs)*UINT16_MAX)
-		pwm_init(1, &pins[0], false);
-		pwm_set_freq(50);
-		pwm_set_duty(3277);
-		pwm_start();
-		vTaskDelay(500);
+		for (int i=0; i < BELLS; i++) {
+			TickType_t now = xTaskGetTickCount();
+			uint16_t delta = now - bellcalls[i];
+			float deltaFactor = delta * 100.0;
+			uint16_t laps = deltaFactor / servoRange;
+			if (laps < 2 && now > 1000) {
+				uint16_t rest = (int)deltaFactor % servoRange;
+				uint16_t posOut = 0;
+				//Make servos sweep from start to end, and back again
+				if ((laps % 2) == 0) {
+					posOut = servoStart + rest; //Add to start value at even laps
+				} else {
+					posOut = servoStart + servoRange - rest; //Subtract from end value at odd laps
+				}
+				//printf("Bell %d Lap: %d Servopos: %d\n", i+1, laps, posOut);
+				pwm_init(1, &pins[i], false);
+				pwm_set_freq(50);
+				pwm_set_duty(posOut);
+				pwm_start();
+				vTaskDelay(1);
+			}
+		}
+		pwm_stop();
 
-		pwm_init(1, &pins[1], false);
-		pwm_set_freq(50);
-		pwm_set_duty(4915);
-		pwm_start();
-		vTaskDelay(500);
-
-		vTaskDelay(200);
+		vTaskDelay(1);
 	}
 }
 
