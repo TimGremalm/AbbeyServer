@@ -17,7 +17,7 @@
 
 #include "pwm.h"
 
-#define MQTT_HOST ("192.168.0.1")
+#define MQTT_HOST ("192.168.0.48")
 #define MQTT_PORT 1883
 
 #define MQTT_USER NULL
@@ -225,8 +225,8 @@ static void wifi_task(void *pvParameters) {
 
 void servo_task(void *pvParameters) {
 	uint8_t pins[] = {14, 12, 13, 15, 5, 4}; //NodeMCU D5-D10 https://github.com/nodemcu/nodemcu-devkit-v1.0#pin-map
-	uint16_t servoRange = 2000;
-	uint16_t servoStart = 4000;
+	uint16_t servoRange = 2400;
+	uint16_t servoStart = 3500;
 	while(1) {
 		for (int i=0; i < BELLS; i++) {
 			TickType_t now = xTaskGetTickCount();
