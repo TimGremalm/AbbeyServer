@@ -251,10 +251,12 @@ void servo_task(void *pvParameters) {
 				pwm_set_freq(50);
 				pwm_set_duty(posOut);
 				pwm_start();
-				if (laps >= lapsMax) {
-					bellCallHandeled[i] = 1;
-				}
 				vTaskDelay(1);
+			} else {
+				if (bellCallHandeled[i] == 0) {
+					bellCallHandeled[i] = 1;
+					printf("Bell stopped at %d\n", now);
+				}
 			}
 		}
 		pwm_stop();
