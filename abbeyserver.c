@@ -17,7 +17,7 @@
 
 #include "pwm.h"
 
-#define MQTT_HOST ("192.168.0.48")
+#define MQTT_HOST ("192.168.0.186")
 #define MQTT_PORT 1883
 
 #define MQTT_USER NULL
@@ -33,6 +33,7 @@ QueueHandle_t publish_queue;
 
 #define BELLS 6
 TickType_t bellcalls[BELLS] = {0};
+int bellCallHandeled[BELLS] = {1};
 
 static void beat_task(void *pvParameters) {
 	TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -71,10 +72,12 @@ static void topic_received(mqtt_message_data_t *md) {
 				printf("Call all bells at tick %d\n", now);
 				for (i=0; i < BELLS; i++) {
 					bellcalls[i] = now;
+					bellCallHandeled[i] = 0;
 				}
 			} else {
 				printf("Call bell: %d at tick %d\n", parsedNumber, now);
 				bellcalls[parsedNumber - 1] = now;
+				bellCallHandeled[parsedNumber - 1] = 0;
 			}
 		}
 	}
@@ -233,7 +236,8 @@ void servo_task(void *pvParameters) {
 			uint16_t delta = now - bellcalls[i];
 			float deltaFactor = delta * 100.0;
 			uint16_t laps = deltaFactor / servoRange;
-			if (laps < 2 && now > 1000) {
+			int lapsMax = 2;
+			if (laps < lapsMax && bellCallHandeled[i] == 0) {
 				uint16_t rest = (int)deltaFactor % servoRange;
 				uint16_t posOut = 0;
 				//Make servos sweep from start to end, and back again
@@ -247,6 +251,9 @@ void servo_task(void *pvParameters) {
 				pwm_set_freq(50);
 				pwm_set_duty(posOut);
 				pwm_start();
+				if (laps >= lapsMax) {
+					bellCallHandeled[i] = 1;
+				}
 				vTaskDelay(1);
 			}
 		}
