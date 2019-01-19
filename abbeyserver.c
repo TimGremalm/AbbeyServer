@@ -228,15 +228,15 @@ static void wifi_task(void *pvParameters) {
 
 void servo_task(void *pvParameters) {
 	uint8_t pins[] = {14, 12, 13, 15, 5, 4}; //NodeMCU D5-D10 https://github.com/nodemcu/nodemcu-devkit-v1.0#pin-map
-	uint16_t servoRange = 2400;
-	uint16_t servoStart = 3500;
+	uint16_t servoRange = 2900;
+	uint16_t servoStart = 3400;
 	while(1) {
 		for (int i=0; i < BELLS; i++) {
 			TickType_t now = xTaskGetTickCount();
 			uint16_t delta = now - bellcalls[i];
-			float deltaFactor = delta * 100.0;
+			float deltaFactor = delta * 130.0;
 			uint16_t laps = deltaFactor / servoRange;
-			int lapsMax = 2;
+			int lapsMax = 6;
 			if (laps < lapsMax && bellCallHandeled[i] == 0) {
 				uint16_t rest = (int)deltaFactor % servoRange;
 				uint16_t posOut = 0;
